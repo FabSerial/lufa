@@ -36,6 +36,40 @@
 
 #include "USBtoSerial.h"
 
+
+/** enforce flow control */
+//#define ENFORCE_FLOW
+
+#ifndef LEDMASK_RX
+/** LED mask for receving indicator */
+#define LEDMASK_RX		 LEDS_NO_LEDS
+#endif // ! LEDMASK_RX
+
+#ifndef LEDMASK_TX
+/** LED mask for transmitting indicator */
+#define LEDMASK_TX		 LEDS_NO_LEDS
+#endif // ! LEDMASK_TX
+
+#ifndef LEDMASK_DSR
+/** LED mask for flow input indicator */
+#define LEDMASK_DSR		 LEDS_NO_LEDS
+#endif // ! LEDMASK_DSR
+
+#ifndef LEDMASK_DTR
+/** LED mask for flow output indicator */
+#define LEDMASK_DTR		 LEDS_NO_LEDS
+#endif // ! LEDMASK_DTR
+
+
+/* PortD */
+#define FLOW_IN (1 << 7)
+#define FLOW_OUT (1 << 6)
+
+#define CONTROL_LINE_OUT CDC_CONTROL_LINE_OUT_DTR
+//#define CONTROL_LINE_OUT CDC_CONTROL_LINE_OUT_RTS
+
+#define CONTROL_LINE_IN CDC_CONTROL_LINE_IN_DSR
+
 /** Circular buffer to hold data from the host before it is sent to the device via the serial port. */
 static RingBuffer_t USBtoUSART_Buffer;
 
@@ -92,8 +126,17 @@ int main(void)
 	LEDs_SetAllLEDs(LEDMASK_USB_NOTREADY);
 	GlobalInterruptEnable();
 
+	uint16_t   oldDeviceToHost=VirtualSerial_CDC_Interface.State.ControlLineStates.DeviceToHost;
+
 	for (;;)
 	{
+
+		CDC_Device_USBTask(&VirtualSerial_CDC_Interface);
+		USB_USBTask();
+
+		if (USB_DeviceState != DEVICE_STATE_Configured)
+			continue;
+
 		/* Only try to read in bytes from the CDC interface if the transmit buffer is not full */
 		if (!(RingBuffer_IsFull(&USBtoUSART_Buffer)))
 		{
@@ -133,12 +176,44 @@ int main(void)
 			}
 		}
 
+		if( ! RingBuffer_IsEmpty(&USARTtoUSB_Buffer) )
+			LEDs_TurnOnLEDs(LEDMASK_RX);
+		else
+			LEDs_TurnOffLEDs(LEDMASK_RX);
+
+		if( ! RingBuffer_IsEmpty(&USBtoUSART_Buffer) )
+			LEDs_TurnOnLEDs(LEDMASK_TX);
+		else
+			LEDs_TurnOffLEDs(LEDMASK_TX);
+
+#ifdef ENFORCE_FLOW
+		/* host not keeping up? */
+		if( RingBuffer_GetFreeCount(&USARTtoUSB_Buffer) < 16 && (PORTD & FLOW_OUT) == 0 )
+		{
+			PORTD |= FLOW_OUT;
+			LEDs_TurnOffLEDs(LEDMASK_DTR);
+		}
+
+		if( RingBuffer_GetCount(&USARTtoUSB_Buffer) < 16 && (PORTD & FLOW_OUT) != 0 && (VirtualSerial_CDC_Interface.State.ControlLineStates.HostToDevice & CONTROL_LINE_OUT) != 0 )
+		{
+			PORTD &= ~FLOW_OUT;
+			LEDs_TurnOnLEDs(LEDMASK_DTR);
+		}
+
+		/* only send when DSR is ready */
+		if( (VirtualSerial_CDC_Interface.State.ControlLineStates.DeviceToHost & CONTROL_LINE_IN) != 0 )
+#endif /* ENFORCE_FLOW */
 		/* Load the next byte from the USART transmit buffer into the USART if transmit buffer space is available */
 		if (Serial_IsSendReady() && !(RingBuffer_IsEmpty(&USBtoUSART_Buffer)))
-		  Serial_SendByte(RingBuffer_Remove(&USBtoUSART_Buffer));
+			Serial_SendByte(RingBuffer_Remove(&USBtoUSART_Buffer));
 
-		CDC_Device_USBTask(&VirtualSerial_CDC_Interface);
-		USB_USBTask();
+		/* Inform the host if any control line states changed */
+		if( VirtualSerial_CDC_Interface.State.ControlLineStates.DeviceToHost != oldDeviceToHost )
+		{
+			CDC_Device_SendControlLineStateChange(&VirtualSerial_CDC_Interface);
+			oldDeviceToHost = VirtualSerial_CDC_Interface.State.ControlLineStates.DeviceToHost;
+		}
+
 	}
 }
 
@@ -154,10 +229,75 @@ void SetupHardware(void)
 	clock_prescale_set(clock_div_1);
 #endif
 
+	/* DSR high */
+	PORTD |= FLOW_OUT;
+	/* DSR as output */
+	DDRD |= FLOW_OUT;
+	/* DTR as input, not really needed as this is the default */
+	DDRD &= ~FLOW_IN;
+	/* DTR enable pull-up */
+	PORTD |= FLOW_IN;
+
+	/* Trigger INT7 on logical change */
+	EICRB |= (1 << ISC70);
+
 	/* Hardware Initialization */
 	LEDs_Init();
 	USB_Init();
+
 }
+
+
+/** Manage DSR flow control input
+ */
+void HandleDSR(USB_ClassInfo_CDC_Device_t* const CDCInterfaceInfo)
+{
+	if( (PIND & FLOW_IN) != 0 )
+	{
+		CDCInterfaceInfo->State.ControlLineStates.DeviceToHost &= ~CONTROL_LINE_IN;
+		LEDs_TurnOffLEDs(LEDMASK_DSR);
+	}
+	else
+	{
+		CDCInterfaceInfo->State.ControlLineStates.DeviceToHost |= CONTROL_LINE_IN;
+		LEDs_TurnOnLEDs(LEDMASK_DSR);
+	}
+
+}
+
+/** Manage DTR flow control output
+ */
+void HandleDTR(USB_ClassInfo_CDC_Device_t* const CDCInterfaceInfo)
+{
+	if( (CDCInterfaceInfo->State.ControlLineStates.HostToDevice & CONTROL_LINE_OUT) != 0 )
+	{
+		PORTD &= ~FLOW_OUT;
+		LEDs_TurnOnLEDs(LEDMASK_DTR);
+	}
+	else
+	{
+		PORTD |= FLOW_OUT;
+		LEDs_TurnOffLEDs(LEDMASK_DTR);
+	}
+}
+
+/** ISR to manage the DSR flow control input
+ */
+ISR(INT7_vect)
+{
+	HandleDSR(&VirtualSerial_CDC_Interface);
+}
+
+/** Event handler for a control line state change on a CDC interface.
+ *
+ *  \param[in] CDCInterfaceInfo  Pointer to the CDC class interface configuration structure being referenced
+ */
+void EVENT_CDC_Device_ControLineStateChanged(USB_ClassInfo_CDC_Device_t* const CDCInterfaceInfo)
+{
+	HandleDTR(CDCInterfaceInfo);
+}
+
+
 
 /** Event handler for the library USB Connection event. */
 void EVENT_USB_Device_Connect(void)
@@ -178,7 +318,18 @@ void EVENT_USB_Device_ConfigurationChanged(void)
 
 	ConfigSuccess &= CDC_Device_ConfigureEndpoints(&VirtualSerial_CDC_Interface);
 
-	LEDs_SetAllLEDs(ConfigSuccess ? LEDMASK_USB_READY : LEDMASK_USB_ERROR);
+	if (ConfigSuccess)
+	{
+		LEDs_SetAllLEDs(LEDMASK_USB_READY);
+		HandleDSR(&VirtualSerial_CDC_Interface);
+		EIMSK |=  ( 1 << INT7);
+	}
+	else
+	{
+		LEDs_SetAllLEDs(LEDMASK_USB_ERROR);
+		EIMSK &= ~( 1 << INT7);
+		HandleDSR(&VirtualSerial_CDC_Interface);
+	}
 }
 
 /** Event handler for the library USB Control Request reception event. */
@@ -195,7 +346,7 @@ ISR(USART1_RX_vect, ISR_BLOCK)
 	uint8_t ReceivedByte = UDR1;
 
 	if ((USB_DeviceState == DEVICE_STATE_Configured) && !(RingBuffer_IsFull(&USARTtoUSB_Buffer)))
-	  RingBuffer_Insert(&USARTtoUSB_Buffer, ReceivedByte);
+		RingBuffer_Insert(&USARTtoUSB_Buffer, ReceivedByte);
 }
 
 /** Event handler for the CDC Class driver Line Encoding Changed event.
@@ -217,7 +368,7 @@ void EVENT_CDC_Device_LineEncodingChanged(USB_ClassInfo_CDC_Device_t* const CDCI
 	}
 
 	if (CDCInterfaceInfo->State.LineEncoding.CharFormat == CDC_LINEENCODING_TwoStopBits)
-	  ConfigMask |= (1 << USBS1);
+		ConfigMask |= (1 << USBS1);
 
 	switch (CDCInterfaceInfo->State.LineEncoding.DataBits)
 	{
@@ -232,6 +383,9 @@ void EVENT_CDC_Device_LineEncodingChanged(USB_ClassInfo_CDC_Device_t* const CDCI
 			break;
 	}
 
+
+	/* Keep the DTR line held high (not ready) while the USART is reconfigured */
+	PORTD |= FLOW_OUT;
 	/* Keep the TX line held high (idle) while the USART is reconfigured */
 	PORTD |= (1 << 3);
 
@@ -248,7 +402,13 @@ void EVENT_CDC_Device_LineEncodingChanged(USB_ClassInfo_CDC_Device_t* const CDCI
 	UCSR1A = (1 << U2X1);
 	UCSR1B = ((1 << RXCIE1) | (1 << TXEN1) | (1 << RXEN1));
 
+	/* Clear ringbuffers of old data */
+	RingBuffer_InitBuffer(&USBtoUSART_Buffer, USBtoUSART_Buffer_Data, sizeof(USBtoUSART_Buffer_Data));
+	RingBuffer_InitBuffer(&USARTtoUSB_Buffer, USARTtoUSB_Buffer_Data, sizeof(USARTtoUSB_Buffer_Data));
+
 	/* Release the TX line after the USART has been reconfigured */
 	PORTD &= ~(1 << 3);
+	/* Reset the DTR line after the USART has been reconfigured */
+	HandleDTR(CDCInterfaceInfo);
 }
 
