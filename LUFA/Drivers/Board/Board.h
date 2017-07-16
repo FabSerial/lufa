@@ -161,6 +161,8 @@
 			#include "AVR8/POLOLUMICRO/Board.h"
 		#elif (BOARD == BOARD_XPLAINED_MINI)
 			#include "AVR8/XPLAINED_MINI/Board.h"
+		#elif (BOARD == BOARD_FABSERIAL)
+			#include "AVR8/FABSERIAL/Board.h"
 		#else
 			#include "Board/Board.h"
 		#endif
