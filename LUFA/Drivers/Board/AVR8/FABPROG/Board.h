@@ -29,40 +29,50 @@
 */
 
 /** \file
- *  \brief Application Configuration Header File
+ *  \brief Board specific information header for the FabSerial board.
+ *  \copydetails Group_BoardInfo_FABSERIAL
  *
- *  This is a header file which is be used to configure some of
- *  the application's compile time options, as an alternative to
- *  specifying the compile time constants supplied through a
- *  makefile or build system.
- *
- *  For information on what each token does, refer to the
- *  \ref Sec_Options section of the application documentation.
+ *  \note This file should not be included directly. It is automatically included as needed by the Board driver
+ *        dispatch header located in LUFA/Drivers/Board/Board.h.
  */
 
-#ifndef _APP_CONFIG_H_
-#define _APP_CONFIG_H_
+/** \ingroup Group_BoardInfo
+ *  \defgroup Group_BoardInfo_FABSERIAL FABSERIAL
+ *  \brief Board specific information header for the FabSerial board.
+ *
+ *  Board specific information header for the FabSerial board ().
+ *
+ *  @{
+ */
 
-	#define AUX_LINE_PORT              PORTB
-	#define AUX_LINE_PIN               PINB
-	#define AUX_LINE_DDR               DDRB
-	#if ((BOARD == BOARD_U2S) || (BOARD == FABPROG))
-		#define AUX_LINE_MASK          (1 << 0)
-	#else
-		#define AUX_LINE_MASK          (1 << 4)
-	#endif
+#ifndef __BOARD_FABSERIAL_H__
+#define __BOARD_FABSERIAL_H__
 
-	#define ENABLE_ISP_PROTOCOL
-	#define ENABLE_XPROG_PROTOCOL
+	/* Includes: */
+		#include "../../../../Common/Common.h"
+		#include "../../LEDs.h"
 
-	#define VTARGET_ADC_CHANNEL        2
-	#define VTARGET_REF_VOLTS          5
-	#define VTARGET_SCALE_FACTOR       1
-//	#define VTARGET_USE_INTERNAL_REF
-	#define NO_VTARGET_DETECT
-//	#define XCK_RESCUE_CLOCK_ENABLE
-//	#define INVERTED_ISP_MISO
+	/* Enable C linkage for C++ Compilers: */
+		#if defined(__cplusplus)
+			extern "C" {
+		#endif
 
-//	#define FIRMWARE_VERSION_MINOR     0x11
+	/* Preprocessor Checks: */
+		#if !defined(__INCLUDE_FROM_BOARD_H)
+			#error Do not include this file directly. Include LUFA/Drivers/Board/Board.h instead.
+		#endif
+
+	/* Public Interface - May be used in end-application: */
+		/* Macros: */
+			/** Indicates the board has hardware LEDs mounted. */
+			#define BOARD_HAS_LEDS
+
+	/* Disable C linkage for C++ Compilers: */
+		#if defined(__cplusplus)
+			}
+		#endif
 
 #endif
+
+/** @} */
+

@@ -45,7 +45,7 @@
  *  <table>
  *    <tr><th>Name</th><th>Color</th><th>Info</th><th>Active Level</th><th>Port Pin</th></tr>
  *    <tr><td>LEDS_LED1</td><td>Green</td><td>RX LED</td><td>Low</td><td>PORTD.4</td></tr>
- *    <tr><td>LEDS_LED2</td><td>Red</td><td>TX LED</td><td>Low</td><td>PORTD.5</td></tr>
+ *    <tr><td><s>LEDS_LED2</s></td><td><s>Red</s></td><td></>TX LED</s></td><td><s>Low</s></td><td><s>PORTD.5</s></td></tr>
  *  </table>
  *
  *  @{
@@ -74,10 +74,11 @@
 			#define LEDS_LED1        (1 << 4)
 
 			/** LED mask for the second LED on the board. */
-			#define LEDS_LED2        (1 << 5)
+//			#define LEDS_LED2        (1 << 5)
 
 			/** LED mask for all the LEDs on the board. */
-			#define LEDS_ALL_LEDS    (LEDS_LED1 | LEDS_LED2)
+//			#define LEDS_ALL_LEDS    (LEDS_LED1 | LEDS_LED2)
+			#define LEDS_ALL_LEDS    (LEDS_LED1)
 
 			/** LED mask for none of the board LEDs. */
 			#define LEDS_NO_LEDS     0
